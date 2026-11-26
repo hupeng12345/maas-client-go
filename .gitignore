@@ -1,0 +1,17 @@
+# Build and module caches (kept inside the workspace so nothing leaks into $HOME)
+.gocache/
+.gotmp/
+.gomodcache/
+.gopath/
+
+# Local configuration and artifacts
+.env
+*.pcm
+*.wav
+coverage.out
+coverage.html
+bin/
+
+# IDE
+.idea/
+.vscode/

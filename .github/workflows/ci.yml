@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ["1.21", "1.22", "1.23"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: true
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l $(git ls-files '*.go'))
+          if [ -n "$out" ]; then echo "not gofmt-ed:"; echo "$out"; exit 1; fi
+
+      - name: English-only sources
+        run: |
+          # Comments, log messages and error text must be English.
+          if grep -rln '[一-鿿]' --include='*.go' --exclude-dir=.git .; then
+            echo "CJK characters found in Go sources"; exit 1
+          fi
+
+      - name: No implicit environment variables
+        run: |
+          if grep -rn 'os\.Getenv\|os\.LookupEnv' --include='*.go' . | grep -v '_test.go'; then
+            echo "library code must not read environment variables"; exit 1
+          fi
+
+      - name: Sensitive content
+        run: ./scripts/check-sensitive.sh
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  minimal-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: true
+      - name: Direct dependencies must stay on the allowlist
+        run: |
+          echo "direct dependencies:"
+          go list -m -f '{{if not .Indirect}}{{.Path}}{{end}}' all | grep -v '^$'
+          unexpected=$(go list -m -f '{{if not .Indirect}}{{.Path}}{{end}}' all \
+            | grep -v '^$' \
+            | grep -v '^github.com/hupeng12345/maas-client-go$' \
+            | grep -v '^github.com/bytedance/sonic$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "unexpected direct dependency (needs review): $unexpected"; exit 1
+          fi
